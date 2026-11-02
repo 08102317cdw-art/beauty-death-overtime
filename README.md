@@ -4,6 +4,12 @@ Beauty: Death Overtime. A short, seedable beauty-pageant strategy game. The comm
 
 This is a vertical slice: title, visa, one contest round, one overtime, and a win or a death notice. Same visa number, same rivals, same rules. Different hands, different obituaries.
 
+## Play
+
+[https://08102317cdw-art.github.io/beauty-death-overtime/](https://08102317cdw-art.github.io/beauty-death-overtime/)
+
+That address is the GitHub Pages build of `main`. The site is served from the `/beauty-death-overtime/` subpath, and the Vite `base` matches it so scripts, fonts, and the icon load there. The first time, set the repository to **Settings → Pages → Build and deployment → Source: GitHub Actions**. The workflow cannot switch that setting itself.
+
 ## Run locally
 
 ```bash
@@ -11,12 +17,14 @@ npm install
 npm run dev
 ```
 
-Open the URL Vite prints (default `http://localhost:5173`). Production build:
+Open `http://localhost:5173/beauty-death-overtime/`. Dev uses the same subpath as Pages. Production build:
 
 ```bash
 npm run build
 npm run preview
 ```
+
+Preview is `http://localhost:4173/beauty-death-overtime/`.
 
 No runtime dependencies. TypeScript and Vite only. A balance check lives at `npm run balance` and simulates scripted play across seeds.
 
@@ -70,4 +78,4 @@ Scoring constants live in `src/game/systems/scoring.ts`. If a rule's 执行 line
 
 ## License
 
-Game code is [MIT](LICENSE). The subset fonts in `public/fonts` are SIL Open Font License 1.1; see [public/fonts/OFL.txt](public/fonts/OFL.txt).
+Game code is [MIT](LICENSE). The subset fonts in `src/assets/fonts` are SIL Open Font License 1.1; see [public/fonts/OFL.txt](public/fonts/OFL.txt).

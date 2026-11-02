@@ -77,7 +77,7 @@ Hearts and diamonds are blood. Spades and clubs are gold, or ink when drawn on p
 
 ### Type
 
-- Chinese: Noto Serif SC, weights 400 and 600, subset in `public/fonts`. Do not fall back to a gothic or a handwriting face.
+- Chinese: Noto Serif SC, weights 400 and 600, subset in `src/assets/fonts` so the Pages build can prefix the files. License text stays in `public/fonts/OFL.txt`. Do not fall back to a gothic or a handwriting face.
 - Latin and numerals: Cinzel. Eyebrows, visa numbers, the ledger total, the timer. Letterspaced. Never used for Chinese.
 - Titles are large, with tight leading. A single blood rule may separate 选美 from 死亡加时赛. Do not add a second accent line on the same screen.
 - No Comic Sans, no rounded display faces, no all-caps Chinese.
