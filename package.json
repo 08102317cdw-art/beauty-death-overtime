@@ -1,0 +1,18 @@
+{
+  "name": "beauty-death-overtime",
+  "private": true,
+  "version": "0.1.0",
+  "description": "选美：死亡加时赛 — a beauty-pageant death-game roguelike.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "balance": "node scripts/run-balance.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^6.0.11"
+  }
+}
