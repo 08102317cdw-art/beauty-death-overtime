@@ -1,16 +1,19 @@
-import { thoughtLine, modeLabel, CLAUSES } from "../content/copy";
+import { thoughtLine, modeLabel, CLAUSES, flourishLine } from "../content/copy";
 import { converge } from "../systems/contest";
-import type { ClauseId, RoundOutcome, Seat } from "../types";
+import type { ClauseId, Flourish, RoundOutcome, Seat } from "../types";
 import { esc, fixed, scoreText } from "../ui/format";
 
 export function renderVerdict(
   seats: Seat[],
   outcome: RoundOutcome,
   round: number,
+  trial: 1 | 2 | 3,
   duel: boolean,
   fresh: ClauseId[],
   playerAlive: boolean,
   onlyPlayer: boolean,
+  flourish: Flourish | null,
+  note: string,
 ): string {
   const rows = seats
     .map((seat) => {
@@ -46,21 +49,27 @@ export function renderVerdict(
   if (!playerAlive) {
     next = "阅读终局文书";
     act = "ending";
-  } else if (onlyPlayer) {
+  } else if (onlyPlayer && trial === 3) {
     next = "接受加冕";
     act = "ending";
+  } else if (onlyPlayer) {
+    next = "前往场间";
+    act = "reward";
   } else if (fresh.length) {
     next = "消化新条款 · 五分钟";
   }
 
-  return `<section class="verdict">
+  const stampClass = flourish === "exact" || flourish === "counter" ? "stamp-gold" : "";
+  return `<section class="verdict ${flourish ? `flourish-${flourish}` : ""}">
     <header class="scene-head">
-      <p class="eyebrow">第 ${round} 轮 · ${modeLabel(outcome.mode)}</p>
+      <p class="eyebrow">第 ${trial} 庭 · 第 ${round} 轮 · ${modeLabel(outcome.mode)}</p>
       <div class="res-title">
         <h2>${outcome.winnerIds.length ? "目标已落" : "本轮无胜者"}</h2>
-        <div class="stamp ${outcome.mode === "exact" ? "stamp-gold" : ""}">${modeLabel(outcome.mode)}</div>
+        <div class="stamp ${stampClass}">${flourish === "counter" ? "反杀" : modeLabel(outcome.mode)}</div>
       </div>
     </header>
+    ${flourish ? `<p class="flourish-line">${flourishLine(flourish)}</p>` : ""}
+    ${note ? `<p class="flourish-line">${esc(note)}</p>` : ""}
     <div class="target-block">
       <div><span>平均</span><b class="latin">${fixed(outcome.average)}</b></div>
       <div><span>× 0.8</span><b class="latin">${fixed(outcome.target)}</b></div>

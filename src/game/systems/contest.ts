@@ -43,20 +43,35 @@ export function withoutBlame(n: number, duel: boolean): number {
   return n;
 }
 
-export function aiNumber(role: Role, seed: string, round: number, duel: boolean): number {
+export function aiNumber(role: Role, seed: string, round: number, duel: boolean, trial = 1): number {
   if (role === "player") return 0;
   if (role === "king") return withoutBlame(converge(2), duel);
   if (role === "rational") return converge(1);
   if (role === "deep") return converge(3);
-  const h = hashSeed(`${seed}:chaos:${round}`);
+  if (role === "mirror" || role === "conform") return converge(1);
+  if (role === "grudge") return converge(2);
+  const h = hashSeed(`${seed}:t${trial}:chaos:${round}`);
   if (h % 4 === 0) return [0, 100, 99, 1][(h >>> 4) % 4];
   return converge(0);
 }
 
-export function resolveRound(seats: Seat[], submitted: Submitted[], eliminatedCount: number): RoundOutcome {
+export interface RoundMods {
+  /** Player's exact hit pushes other non-timeout losers one point further. */
+  imprint: boolean;
+  /** One charge: a duplicated player number steps aside, or a timeout costs nothing. */
+  reprieve: boolean;
+}
+
+export function resolveRound(
+  seats: Seat[],
+  submitted: Submitted[],
+  eliminatedCount: number,
+  mods: RoundMods = { imprint: false, reprieve: false },
+): RoundOutcome & { reprieveUsed: "timeout" | "unique" | null } {
   const alive = seats.filter((seat) => seat.alive);
   const byId = new Map(submitted.map((item) => [item.id, item]));
   const rules = rulesNow(eliminatedCount, alive.length);
+  let reprieveUsed: "timeout" | "unique" | null = null;
   const rows: RoundRow[] = alive.map((seat) => {
     const choice = byId.get(seat.id);
     const timeout = !choice || choice.number === null;
@@ -69,13 +84,47 @@ export function resolveRound(seats: Seat[], submitted: Submitted[], eliminatedCo
     };
   });
 
+  if (mods.reprieve) {
+    const player = rows.find((row) => row.id === "player");
+    if (player?.voidReason === "timeout") {
+      reprieveUsed = "timeout";
+    } else if (player && player.number !== null && rulesNow(eliminatedCount, alive.length).duplicate) {
+      const counts = new Map<number, number>();
+      for (const row of rows) {
+        if (row.number === null) continue;
+        counts.set(row.number, (counts.get(row.number) ?? 0) + 1);
+      }
+      if ((counts.get(player.number) ?? 0) >= 2) {
+        const taken = new Set(
+          rows.filter((row) => row.id !== "player" && row.number !== null).map((row) => row.number as number),
+        );
+        const start = player.number;
+        let moved = false;
+        for (let distance = 1; distance <= 100 && !moved; distance++) {
+          for (const sign of [1, -1]) {
+            const next = start + sign * distance;
+            if (next < 0 || next > 100 || taken.has(next)) continue;
+            player.number = next;
+            reprieveUsed = "unique";
+            moved = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+
   if (rules.duel) {
     const hasZero = rows.some((row) => row.number === 0);
     const hundreds = rows.filter((row) => row.number === 100);
     if (hasZero && hundreds.length > 0) {
       const winners = new Set(hundreds.map((row) => row.id));
-      for (const row of rows) row.delta = winners.has(row.id) ? 0 : -1;
-      return finish(seats, rows, null, null, null, "duel", [...winners]);
+      for (const row of rows) {
+        if (winners.has(row.id)) row.delta = 0;
+        else if (row.id === "player" && reprieveUsed === "timeout") row.delta = 0;
+        else row.delta = -1;
+      }
+      return { ...finish(seats, rows, null, null, null, "duel", [...winners]), reprieveUsed };
     }
   }
 
@@ -95,8 +144,10 @@ export function resolveRound(seats: Seat[], submitted: Submitted[], eliminatedCo
 
   const valid = rows.filter((row) => row.eligible && row.number !== null);
   if (valid.length === 0) {
-    for (const row of rows) row.delta = -1;
-    return finish(seats, rows, null, null, null, "none", []);
+    for (const row of rows) {
+      row.delta = row.id === "player" && reprieveUsed === "timeout" ? 0 : -1;
+    }
+    return { ...finish(seats, rows, null, null, null, "none", []), reprieveUsed };
   }
 
   const average = valid.reduce((sum, row) => sum + (row.number as number), 0) / valid.length;
@@ -122,12 +173,13 @@ export function resolveRound(seats: Seat[], submitted: Submitted[], eliminatedCo
   }
 
   const winnerSet = new Set(winners.map((row) => row.id));
+  const imprint = mods.imprint && mode === "exact" && winnerSet.has("player");
   for (const row of rows) {
     if (winnerSet.has(row.id)) row.delta = 0;
-    else if (row.voidReason === "timeout") row.delta = -1;
-    else row.delta = -penalty;
+    else if (row.voidReason === "timeout") row.delta = row.id === "player" && reprieveUsed === "timeout" ? 0 : -1;
+    else row.delta = imprint ? -(penalty + 1) : -penalty;
   }
-  return finish(seats, rows, average, target, rounded, mode, [...winnerSet]);
+  return { ...finish(seats, rows, average, target, rounded, mode, [...winnerSet]), reprieveUsed };
 }
 
 function finish(

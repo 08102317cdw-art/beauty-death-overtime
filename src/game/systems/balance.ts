@@ -1,4 +1,5 @@
-import { createSeats } from "../content/cast";
+import { createSeats, seatFrom, RIVALS } from "../content/cast";
+import { buildCourt, courtIntents, drawRivalIds, rewardOrder } from "./tour";
 import type { ClauseId, Seat, Submitted } from "../types";
 import {
   aiNumber,
@@ -165,6 +166,91 @@ function playSeed(seed: string, perfect: boolean): { win: boolean; saw: ClauseId
   return { win, saw: [...saw], rounds, playerScore };
 }
 
+function checkTour(): void {
+  const first = drawRivalIds("VX-TEST", 1, []);
+  assert(JSON.stringify(first) === JSON.stringify(drawRivalIds("VX-TEST", 1, [])), "trial draw drifted");
+  assert(first.length === 4 && !first.includes("king"), "trial 1 has no king");
+  assert(!drawRivalIds("VX-TEST", 2, ["baici"]).includes("king"), "trial 2 has no king");
+  const boss = drawRivalIds("VX-TEST", 3, ["baici"]);
+  assert(boss[0] === "king" && boss.includes("baici") && boss.length === 4, `boss ${boss.join(",")}`);
+  const rewards = rewardOrder("VX-TEST", 1);
+  assert(rewards.length === 3 && new Set(rewards).size === 3, "three rewards");
+  assert(JSON.stringify(rewards) === JSON.stringify(rewardOrder("VX-TEST", 1)), "reward seed");
+
+  const rational = RIVALS.find((rival) => rival.id === "baici");
+  if (!rational) throw new Error("missing baici");
+  const calm = courtIntents([seatFrom(rational, false, false)], {
+    seed: "VX-TEST",
+    trial: 1,
+    round: 1,
+    duel: false,
+    playerLast: null,
+  });
+  const burned = courtIntents([seatFrom(rational, true, false)], {
+    seed: "VX-TEST",
+    trial: 1,
+    round: 1,
+    duel: false,
+    playerLast: null,
+  });
+  assert(calm.get("baici") === 40 && burned.get("baici") === 32, `scar depth ${calm.get("baici")} ${burned.get("baici")}`);
+
+  const shielded = createSeats("七号").slice(0, 2);
+  const timeout = resolveRound(
+    shielded,
+    [
+      { id: "player", number: null },
+      { id: shielded[1]?.id ?? "king", number: 40 },
+    ],
+    0,
+    { imprint: false, reprieve: true },
+  );
+  assert(timeout.reprieveUsed === "timeout", "reprieve marks timeout");
+  assert(timeout.rows.find((row) => row.id === "player")?.delta === 0, "timeout pardon");
+
+  const printed = resolveRound(
+    createSeats("七号").filter((seat) => ["player", "baici", "lengyin"].includes(seat.id)),
+    [
+      { id: "player", number: 20 },
+      { id: "baici", number: 30 },
+      { id: "lengyin", number: 24 },
+    ],
+    2,
+    { imprint: true, reprieve: false },
+  );
+  assert(printed.mode === "exact", "imprint still exact");
+  assert(printed.rows.find((row) => row.id === "baici")?.delta === -3, "imprint presses to -3");
+
+  for (const seed of ["VX-TEST", "ROSE", "KING"]) {
+    let scars: string[] = [];
+    for (const trial of [1, 2, 3] as const) {
+      const seats = buildCourt("七号", seed, trial, scars, null);
+      assert(seats.length === 5, "five seats");
+      assert((trial === 3) === seats.some((seat) => seat.role === "king"), `${seed} trial ${trial} king`);
+      let eliminated = 0;
+      let round = 1;
+      let playerLast: number | null = null;
+      let guard = 0;
+      while (guard < 45) {
+        guard += 1;
+        const alive = seats.filter((seat) => seat.alive);
+        if (!alive.some((seat) => seat.id === "player")) throw new Error(`${seed} died in trial ${trial}`);
+        if (alive.length === 1) break;
+        const duel = eliminated >= 3 && alive.length === 2;
+        const intents = courtIntents(seats, { seed, trial, round, duel, playerLast });
+        const known = [...intents.entries()].map(([id, number]) => ({ id, number }));
+        const choice = bestNumber(seats, known, eliminated);
+        const outcome = resolveRound(seats, [...known, { id: "player", number: choice }], eliminated);
+        applyOutcome(seats, outcome);
+        playerLast = choice;
+        eliminated = seats.filter((seat) => !seat.alive).length;
+        round += 1;
+      }
+      if (seats.filter((seat) => seat.alive).length !== 1) throw new Error(`${seed} stuck in trial ${trial}`);
+    }
+  }
+}
+
 export function runBalance(): void {
   checkFixedRounds();
   const seeds = ["VX-TEST", "ROSE", "AAAA", "灯", "BORDER", "19", "KING", "7777"];
@@ -181,6 +267,7 @@ export function runBalance(): void {
     assert(JSON.stringify(steady) === JSON.stringify(again), `seed drifted ${seed}`);
     console.log(seed, "steady", steady.win, steady.playerScore, steady.saw.join("+") || "-", "perfect", perfect.win, perfect.playerScore);
   }
+  checkTour();
   assert(perfectWins === seeds.length, `perfect clears ${perfectWins}/${seeds.length}`);
   assert(steadyWins >= Math.ceil(seeds.length * 0.6), `steady clears ${steadyWins}/${seeds.length}`);
   assert(steadySawDuel >= 4, `rules rarely appear ${steadySawDuel}`);

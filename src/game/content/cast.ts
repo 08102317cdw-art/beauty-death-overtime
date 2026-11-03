@@ -1,5 +1,15 @@
 import type { Look, Seat } from "../types";
 
+export interface RivalTemplate {
+  id: string;
+  name: string;
+  epithet: string;
+  role: Seat["role"];
+  depth: Seat["depth"];
+  bio: string;
+  look: Look;
+}
+
 const playerLook: Look = {
   hair: "crop",
   mark: "earring",
@@ -68,6 +78,8 @@ export function createSeats(playerName: string): Seat[] {
       look: playerLook,
       score: 0,
       alive: true,
+      scarred: false,
+      revealed: false,
     },
     {
       id: "king",
@@ -79,6 +91,8 @@ export function createSeats(playerName: string): Seat[] {
       look: kingLook,
       score: 0,
       alive: true,
+      scarred: false,
+      revealed: false,
     },
     {
       id: "baici",
@@ -90,6 +104,8 @@ export function createSeats(playerName: string): Seat[] {
       look: rationalLook,
       score: 0,
       alive: true,
+      scarred: false,
+      revealed: false,
     },
     {
       id: "lengyin",
@@ -101,6 +117,8 @@ export function createSeats(playerName: string): Seat[] {
       look: deepLook,
       score: 0,
       alive: true,
+      scarred: false,
+      revealed: false,
     },
     {
       id: "jiangsha",
@@ -112,6 +130,118 @@ export function createSeats(playerName: string): Seat[] {
       look: chaosLook,
       score: 0,
       alive: true,
+      scarred: false,
+      revealed: false,
     },
   ];
+}
+
+const mirrorLook: Look = {
+  hair: "long",
+  mark: "none",
+  hairColor: "#1c1a1a",
+  lip: "#9a2433",
+  wash: "#0e0c0c",
+  metal: "#d9d0bc",
+  smile: false,
+  coverEye: false,
+};
+
+const conformLook: Look = {
+  hair: "long",
+  mark: "earring",
+  hairColor: "#8a5a32",
+  lip: "#a65458",
+  wash: "#14100c",
+  metal: "#e0c28a",
+  smile: true,
+  coverEye: false,
+};
+
+const grudgeLook: Look = {
+  hair: "long",
+  mark: "scar",
+  hairColor: "#140c16",
+  lip: "#6a1830",
+  wash: "#100c12",
+  metal: "#9a2433",
+  smile: false,
+  coverEye: false,
+};
+
+export const RIVALS: RivalTemplate[] = [
+  {
+    id: "baici",
+    name: "白瓷",
+    epithet: "一层",
+    role: "rational",
+    depth: 1,
+    bio: "她只把平均乘一次。再往下，她认为是别人的事。",
+    look: rationalLook,
+  },
+  {
+    id: "lengyin",
+    name: "冷银",
+    epithet: "深算",
+    role: "deep",
+    depth: 3,
+    bio: "八成，再八成，再八成。她停在第三层，像停在一道算完的墓志铭上。",
+    look: deepLook,
+  },
+  {
+    id: "jiangsha",
+    name: "绛纱",
+    epithet: "搅局",
+    role: "chaos",
+    depth: 0,
+    bio: "她多数时候停在别人的第一眼。偶尔，她把桌子掀了。",
+    look: chaosLook,
+  },
+  {
+    id: "shuangtong",
+    name: "霜桐",
+    epithet: "镜像",
+    role: "mirror",
+    depth: 1,
+    bio: "她不发明数字。她抄你上一轮写下的那个。",
+    look: mirrorLook,
+  },
+  {
+    id: "mila",
+    name: "蜜蜡",
+    epithet: "同温",
+    role: "conform",
+    depth: 1,
+    bio: "她坐在别人的中间。房间是什么温度，她就是什么温度。",
+    look: conformLook,
+  },
+  {
+    id: "molian",
+    name: "墨莲",
+    epithet: "记恨",
+    role: "grudge",
+    depth: 2,
+    bio: "平时她乘到第二层。被极端数坑过之后，她会专门对着你来。",
+    look: grudgeLook,
+  },
+  {
+    id: "king",
+    name: "方块王",
+    epithet: "衡平",
+    role: "king",
+    depth: 2,
+    bio: "他把公平说得很慢。第三庭他才进门，决战里不拿一，也不拿一百。",
+    look: kingLook,
+  },
+];
+
+export function seatFrom(template: RivalTemplate, scarred: boolean, revealed: boolean): Seat {
+  return {
+    ...template,
+    score: 0,
+    alive: true,
+    scarred,
+    revealed,
+    look: { ...template.look },
+  };
 }

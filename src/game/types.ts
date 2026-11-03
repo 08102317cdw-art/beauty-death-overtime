@@ -12,7 +12,11 @@ export interface Look {
   coverEye: boolean;
 }
 
-export type Role = "player" | "king" | "rational" | "deep" | "chaos";
+export type Role = "player" | "king" | "rational" | "deep" | "chaos" | "mirror" | "conform" | "grudge";
+
+export type BoonId = "glimpse" | "imprint" | "reprieve";
+
+export type Flourish = "exact" | "chaos" | "danger" | "counter";
 
 export interface Seat {
   id: string;
@@ -24,9 +28,11 @@ export interface Seat {
   look: Look;
   score: number;
   alive: boolean;
+  scarred: boolean;
+  revealed: boolean;
 }
 
-export type SceneId = "title" | "seat" | "tablet" | "decree" | "choose" | "verdict" | "ending";
+export type SceneId = "title" | "brief" | "seat" | "tablet" | "decree" | "choose" | "verdict" | "reward" | "ending";
 
 export type ClauseId = "duplicate" | "exact" | "duel";
 
@@ -64,4 +70,5 @@ export interface Ending {
   win: boolean;
   name: string;
   seed: string;
+  trial: 1 | 2 | 3;
 }

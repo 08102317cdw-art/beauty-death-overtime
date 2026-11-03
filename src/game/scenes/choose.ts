@@ -2,7 +2,15 @@ import { BASE_ARTICLES, CLAUSES, TIMEOUT_LINE, clauseOrder } from "../content/co
 import type { ClauseId } from "../types";
 import { clock } from "../ui/format";
 
-export function renderChoose(round: number, active: ClauseId[], long: boolean, seconds: number, max: number): string {
+export function renderChoose(
+  trial: 1 | 2 | 3,
+  round: number,
+  active: ClauseId[],
+  long: boolean,
+  seconds: number,
+  max: number,
+  boonLine: string,
+): string {
   const articles = BASE_ARTICLES.map(
     (article) => `<p><b>${article.kicker} ${article.title}。</b>${article.text}</p>`,
   ).join("");
@@ -19,8 +27,9 @@ export function renderChoose(round: number, active: ClauseId[], long: boolean, s
   return `<section class="choose">
     <header class="choose-head">
       <div>
-        <p class="eyebrow">第 ${round} 轮${long ? " · 五分钟" : " · 一分钟"}</p>
+        <p class="eyebrow">第 ${trial} 庭 · 第 ${round} 轮${long ? " · 五分钟" : " · 一分钟"}</p>
         <h2>${long ? "消化规则" : "落子"}</h2>
+        ${boonLine ? `<p class="boon-line">${boonLine}</p>` : ""}
       </div>
       <div class="timer ${late ? "is-late" : ""}" id="timer">
         <svg viewBox="0 0 44 44" aria-hidden="true">
