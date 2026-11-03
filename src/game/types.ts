@@ -1,38 +1,5 @@
-export type Suit = "spades" | "hearts" | "diamonds" | "clubs";
-
-export type Personality = "clout" | "craft" | "schemer" | "saint";
-
-export type SceneId =
-  | "title"
-  | "visa"
-  | "briefing"
-  | "round"
-  | "resolution"
-  | "ending";
-
-export type StrategyId = "glamour" | "craft" | "scandal" | "borrow";
-
-export type AudienceId = "speech" | "bribe" | "rumor" | "silence";
-
-export type SocialKind = "ally" | "betray" | "abstain";
-
 export type Hair = "bob" | "long" | "updo" | "veil" | "crop" | "wave";
-
 export type Mark = "mole" | "earring" | "tear" | "scar" | "none";
-
-export type RuleId =
-  | "lens_hunger"
-  | "hot_light"
-  | "smile_tax"
-  | "dirt_window"
-  | "public_lie"
-  | "silence_prize"
-  | "handshake"
-  | "chain_letter"
-  | "showdown_dirt"
-  | "the_dogs"
-  | "epitaph_clock"
-  | "blood_due";
 
 export interface Look {
   hair: Hair;
@@ -45,128 +12,56 @@ export interface Look {
   coverEye: boolean;
 }
 
-export interface Contestant {
+export type Role = "player" | "king" | "rational" | "deep" | "chaos";
+
+export interface Seat {
   id: string;
   name: string;
   epithet: string;
+  role: Role;
+  depth: 0 | 1 | 2 | 3;
   bio: string;
-  personality: Personality;
-  personalityLabel: string;
   look: Look;
-  isPlayer: boolean;
-  popularity: number;
-  acting: number;
-  dirt: number;
+  score: number;
   alive: boolean;
-  overexposed: boolean;
 }
 
-export interface Pact {
-  from: string;
-  to: string;
-}
+export type SceneId = "title" | "seat" | "tablet" | "decree" | "choose" | "verdict" | "ending";
 
-export interface Decision {
-  strategy: StrategyId | "freeze";
-  audience: AudienceId | "freeze";
-  rumorTarget: string | null;
-  social: SocialKind;
-  socialTarget: string | null;
-  timedOut: boolean;
-}
+export type ClauseId = "duplicate" | "exact" | "duel";
 
-export interface RuleCard {
-  id: RuleId;
-  name: string;
-  suit: Suit | "overtime";
-  kicker: string;
-  text: string;
-  plain: string;
-}
-
-export interface ScoreBreakdown {
+export interface Submitted {
   id: string;
-  base: number;
-  strategy: number;
-  audience: number;
-  social: number;
-  rule: number;
-  penalty: number;
-  jitter: number;
-  total: number;
-  tags: string[];
-  timedOut: boolean;
+  /** null means the number was voided by timeout. */
+  number: number | null;
 }
 
-export interface RoundRecord {
-  index: 0 | 1;
-  ruleId: RuleId;
-  decisions: Record<string, Decision>;
-  scores: Record<string, ScoreBreakdown>;
-  ranking: string[];
-  eliminated: string[];
-  winner: string | null;
+export type VoidReason = "timeout" | "duplicate" | null;
+
+export interface RoundRow {
+  id: string;
+  number: number | null;
+  voidReason: VoidReason;
+  delta: number;
+  eligible: boolean;
 }
 
-export interface Run {
-  seed: string;
-  playerName: string;
-  suit: Suit;
-  roster: Contestant[];
-  rule1: RuleCard;
-  ruleOT: RuleCard;
-  alliances: Pact[];
-  lieRecommend: StrategyId;
-  rounds: RoundRecord[];
+export type RoundMode = "closest" | "exact" | "duel" | "none";
+
+export interface RoundOutcome {
+  average: number | null;
+  target: number | null;
+  rounded: number | null;
+  mode: RoundMode;
+  winnerIds: string[];
+  rows: RoundRow[];
+  eliminatedIds: string[];
+  scores: Record<string, number>;
+  aliveAfter: string[];
 }
 
 export interface Ending {
   win: boolean;
-  title: string;
-  epitaph: string;
-  body: string;
-  placeLabel: string;
-  suit: Suit;
-  seed: string;
   name: string;
-}
-
-export interface GameState {
-  scene: SceneId;
   seed: string;
-  playerName: string;
-  suit: Suit | null;
-  run: Run | null;
-  briefingRound: 0 | 1;
-  beat: 0 | 1 | 2;
-  pickingRumor: boolean;
-  socialMode: "ally" | "betray";
-  pending: Partial<Decision>;
-  timerLeft: number;
-  timerMax: number;
-  resolutionRound: 0 | 1 | null;
-  ending: Ending | null;
-  lastRunLine: string;
-}
-
-export interface GameController {
-  state: GameState;
-  muted: boolean;
-  setSeed(seed: string): void;
-  setName(name: string): void;
-  randomizeSeed(): void;
-  goVisa(): void;
-  chooseSuit(suit: Suit): void;
-  beginRound(): void;
-  pickStrategy(id: StrategyId): void;
-  pickAudience(id: AudienceId): void;
-  pickRumor(id: string): void;
-  cancelRumor(): void;
-  setSocialMode(mode: "ally" | "betray"): void;
-  pickSocialTarget(id: string): void;
-  pickAbstain(): void;
-  continueAfterResolution(): void;
-  retrySame(): void;
-  backToTitle(): void;
-  toggleMute(): void;
 }
