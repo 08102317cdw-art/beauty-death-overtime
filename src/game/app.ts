@@ -1,20 +1,15 @@
 import { AudioDirector } from "./audio";
-import { createSeats } from "./content/cast";
+import { renderBrief } from "./scenes/brief";
 import { renderChoose } from "./scenes/choose";
 import { renderDecree } from "./scenes/decree";
 import { renderEnding } from "./scenes/ending";
+import { renderReward } from "./scenes/reward";
 import { renderSeat, renderTablet, renderTitle } from "./scenes/title";
 import { renderVerdict } from "./scenes/verdict";
 import { randomSeed } from "./rng";
-import {
-  aiNumber,
-  applyOutcome,
-  resolveRound,
-  rulesNow,
-  turnSeconds,
-  unlockedClauses,
-} from "./systems/contest";
-import type { ClauseId, Ending, RoundOutcome, SceneId, Seat } from "./types";
+import { applyOutcome, resolveRound, rulesNow, turnSeconds, unlockedClauses } from "./systems/contest";
+import { buildCourt, courtIntents, glimpseTarget, isExtreme, rewardOrder } from "./systems/tour";
+import type { BoonId, ClauseId, Ending, Flourish, RoundOutcome, SceneId, Seat } from "./types";
 import { bench } from "./ui/bench";
 import { startDust } from "./ui/dust";
 import { esc } from "./ui/format";
@@ -50,6 +45,7 @@ interface State {
   scene: SceneId;
   seed: string;
   playerName: string;
+  trial: 1 | 2 | 3;
   seats: Seat[];
   round: number;
   eliminated: number;
@@ -61,6 +57,15 @@ interface State {
   lastDuel: boolean;
   ending: Ending | null;
   lastLine: string;
+  scars: string[];
+  hurt: string[];
+  imprint: boolean;
+  reprieve: number;
+  glimpseQueued: boolean;
+  revealId: string | null;
+  playerLast: number | null;
+  flourish: Flourish | null;
+  verdictNote: string;
 }
 
 function initial(): State {
@@ -70,6 +75,7 @@ function initial(): State {
     scene: "title",
     seed,
     playerName: "七号",
+    trial: 1,
     seats: [],
     round: 1,
     eliminated: 0,
@@ -81,6 +87,15 @@ function initial(): State {
     lastDuel: false,
     ending: null,
     lastLine: readLast(),
+    scars: [],
+    hurt: [],
+    imprint: false,
+    reprieve: 0,
+    glimpseQueued: false,
+    revealId: null,
+    playerLast: null,
+    flourish: null,
+    verdictNote: "",
   };
 }
 
@@ -88,6 +103,10 @@ function sceneLabel(scene: SceneId): string {
   switch (scene) {
     case "title":
       return "庭门";
+    case "brief":
+      return "整备";
+    case "reward":
+      return "场间";
     case "seat":
       return "入座";
     case "tablet":
@@ -146,16 +165,50 @@ export class Game {
       this.state.playerName = name || "七号";
       this.state.seed = seed || randomSeed();
     }
-    this.state.seats = createSeats(this.state.playerName);
+    this.openTour();
+    this.audio.unlock();
+    this.audio.sting("card");
+    this.render();
+  }
+
+  private openTour(): void {
+    this.state.trial = 1;
+    this.state.scars = [];
+    this.state.hurt = [];
+    this.state.imprint = false;
+    this.state.reprieve = 0;
+    this.state.glimpseQueued = false;
+    this.state.revealId = null;
+    this.state.playerLast = null;
     this.state.round = 1;
     this.state.eliminated = 0;
     this.state.fresh = [];
     this.state.outcome = null;
     this.state.ending = null;
-    this.state.scene = "seat";
-    this.audio.unlock();
-    this.audio.sting("card");
-    this.render();
+    this.state.flourish = null;
+    this.state.verdictNote = "";
+    this.state.seats = buildCourt(this.state.playerName, this.state.seed, 1, [], null);
+    this.state.scene = "brief";
+  }
+
+  private openBrief(trial: 1 | 2 | 3): void {
+    const ids = buildCourt(this.state.playerName, this.state.seed, trial, this.state.scars, null)
+      .filter((seat) => seat.id !== "player")
+      .map((seat) => seat.id);
+    const revealId = this.state.glimpseQueued ? glimpseTarget(this.state.seed, trial, ids) : null;
+    this.state.trial = trial;
+    this.state.glimpseQueued = false;
+    this.state.revealId = revealId;
+    this.state.round = 1;
+    this.state.eliminated = 0;
+    this.state.fresh = [];
+    this.state.outcome = null;
+    this.state.playerLast = null;
+    this.state.hurt = [];
+    this.state.flourish = null;
+    this.state.verdictNote = "";
+    this.state.seats = buildCourt(this.state.playerName, this.state.seed, trial, this.state.scars, revealId);
+    this.state.scene = "brief";
   }
 
   toggleMute(): void {
@@ -184,14 +237,32 @@ export class Game {
     if (this.locked || this.state.scene !== "choose") return;
     this.locked = true;
     this.stopTimer();
-    const { seats, round, eliminated, seed } = this.state;
+    const { seats, round, eliminated, seed, trial } = this.state;
     const alive = seats.filter((seat) => seat.alive);
     const duel = rulesNow(eliminated, alive.length).duel;
+    const intents = courtIntents(seats, {
+      seed,
+      trial,
+      round,
+      duel,
+      playerLast: this.state.playerLast,
+    });
     const submitted = alive.map((seat) => ({
       id: seat.id,
-      number: seat.role === "player" ? number : aiNumber(seat.role, seed, round, duel),
+      number: seat.role === "player" ? number : (intents.get(seat.id) ?? 0),
     }));
-    const outcome = resolveRound(seats, submitted, eliminated);
+    const outcome = resolveRound(seats, submitted, eliminated, {
+      imprint: this.state.imprint,
+      reprieve: this.state.reprieve > 0,
+    });
+    if (outcome.reprieveUsed) this.state.reprieve = Math.max(0, this.state.reprieve - 1);
+    const played = outcome.rows.find((row) => row.id === "player");
+    if (isExtreme(number) && played) {
+      for (const row of outcome.rows) {
+        if (row.id !== "player" && row.delta < 0 && !this.state.hurt.includes(row.id)) this.state.hurt.push(row.id);
+      }
+    }
+    if (played && played.number !== null) this.state.playerLast = played.number;
     const before = eliminated;
     applyOutcome(seats, outcome);
     const after = seats.filter((seat) => !seat.alive).length;
@@ -200,9 +271,20 @@ export class Game {
     this.state.lastDuel = duel;
     this.state.eliminated = after;
     this.state.fresh = fresh;
+    this.state.flourish = this.flourishFor(seats, outcome, number);
+    this.state.verdictNote =
+      outcome.reprieveUsed === "timeout"
+        ? "缓刑挡下了这一次超时。数字仍作废，分数不动。"
+        : outcome.reprieveUsed === "unique"
+          ? "缓刑把你的数字挪开一格。同数没能把你作废。"
+          : this.state.flourish === "exact" && this.state.imprint
+            ? "重印把精确命中又压下一分。"
+            : "";
     this.state.scene = "verdict";
     const playerDead = outcome.eliminatedIds.includes("player");
-    this.audio.sting(playerDead ? "death" : outcome.eliminatedIds.length ? "stamp" : "card");
+    const sting =
+      playerDead ? "death" : this.state.flourish === "exact" || this.state.flourish === "counter" ? "crown" : outcome.eliminatedIds.length ? "stamp" : "card";
+    this.audio.sting(sting);
     this.locked = false;
     this.render();
   }
@@ -224,7 +306,7 @@ export class Game {
 
   private finish(win: boolean): void {
     const player = this.state.seats.find((seat) => seat.id === "player");
-    this.state.ending = { win, name: player?.name ?? "七号", seed: this.state.seed };
+    this.state.ending = { win, name: player?.name ?? "七号", seed: this.state.seed, trial: this.state.trial };
     this.state.scene = "ending";
     const line = win
       ? `上一案 · ${this.state.ending.name} · GAME CLEAR · ${this.state.seed}`
@@ -236,15 +318,40 @@ export class Game {
   }
 
   private retry(): void {
-    this.state.seats = createSeats(this.state.playerName);
-    this.state.round = 1;
-    this.state.eliminated = 0;
-    this.state.fresh = [];
-    this.state.outcome = null;
-    this.state.ending = null;
-    this.state.scene = "seat";
+    this.openTour();
     this.audio.sting("card");
     this.render();
+  }
+
+  private takeBoon(id: BoonId): void {
+    if (id === "imprint") this.state.imprint = true;
+    if (id === "reprieve") this.state.reprieve = Math.min(2, this.state.reprieve + 1);
+    if (id === "glimpse") this.state.glimpseQueued = true;
+    this.state.scars = [...new Set([...this.state.scars, ...this.state.hurt])];
+    const next = (this.state.trial === 1 ? 2 : 3) as 2 | 3;
+    this.openBrief(next);
+    this.audio.sting("card");
+    this.render();
+  }
+
+  private flourishFor(seats: Seat[], outcome: RoundOutcome, playerNumber: number | null): Flourish | null {
+    if (outcome.mode === "duel" && playerNumber === 100) return "counter";
+    if (outcome.mode === "exact" && outcome.winnerIds.includes("player")) return "exact";
+    const chaos = outcome.rows.find((row) => seats.find((seat) => seat.id === row.id)?.role === "chaos");
+    if (chaos && chaos.number !== null && chaos.number !== 50 && outcome.target !== null) {
+      const nums = outcome.rows
+        .filter((row) => row.eligible && row.number !== null)
+        .map((row) => (row.id === chaos.id ? 50 : (row.number as number)));
+      if (nums.length > 0) {
+        const alt = (nums.reduce((sum, value) => sum + value, 0) / nums.length) * 0.8;
+        if (Math.abs(alt - outcome.target) >= 8) return "chaos";
+      }
+    }
+    const dangerous = outcome.eliminatedIds.some((id) => {
+      const role = seats.find((seat) => seat.id === id)?.role;
+      return role === "deep" || role === "chaos" || role === "king" || role === "grudge";
+    });
+    return dangerous ? "danger" : null;
   }
 
   private toTitle(): void {
@@ -343,7 +450,12 @@ export class Game {
     const row = state.seats.length ? bench(state.seats) : "";
     const showBench = state.scene === "choose" || state.scene === "verdict";
     let scene = "";
+    const owned: BoonId[] = [];
+    if (state.imprint) owned.push("imprint");
+    if (state.reprieve > 0) owned.push("reprieve");
     if (state.scene === "title") scene = renderTitle(state.seed, state.playerName, state.lastLine);
+    else if (state.scene === "brief") scene = renderBrief(state.trial, state.seats, owned, state.reprieve);
+    else if (state.scene === "reward") scene = renderReward(state.trial === 1 ? 1 : 2, rewardOrder(state.seed, state.trial === 1 ? 1 : 2));
     else if (state.scene === "seat") scene = renderSeat(beam, bench(state.seats));
     else if (state.scene === "tablet") scene = renderTablet();
     else if (state.scene === "decree") scene = renderDecree();
@@ -354,11 +466,29 @@ export class Game {
         return state.eliminated >= 3;
       });
       const long = state.round <= 1 || state.fresh.length > 0;
-      scene = renderChoose(state.round, active, long, state.timerLeft, state.timerMax);
+      const boonLine = [
+        state.imprint ? "重印" : "",
+        state.reprieve > 0 ? `缓刑 ×${state.reprieve}` : "",
+        state.revealId ? "窥层" : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      scene = renderChoose(state.trial, state.round, active, long, state.timerLeft, state.timerMax, boonLine);
     } else if (state.scene === "verdict" && state.outcome) {
       const playerAlive = state.seats.some((seat) => seat.id === "player" && seat.alive);
-      const onlyPlayer = state.seats.filter((seat) => seat.alive).every((seat) => seat.id === "player");
-      scene = renderVerdict(state.seats, state.outcome, state.round, state.lastDuel, state.fresh, playerAlive, onlyPlayer);
+      const onlyPlayer = state.seats.filter((seat) => seat.alive).length === 1 && playerAlive;
+      scene = renderVerdict(
+        state.seats,
+        state.outcome,
+        state.round,
+        state.trial,
+        state.lastDuel,
+        state.fresh,
+        playerAlive,
+        onlyPlayer,
+        state.flourish,
+        state.verdictNote,
+      );
     } else if (state.ending) scene = renderEnding(state.ending, state.seats);
 
     const win = state.ending?.win === true;
@@ -406,6 +536,11 @@ export class Game {
       if (!button) return;
       const act = button.dataset.act;
       if (act === "random-seed") this.randomizeSeed();
+      if (act === "to-seat") {
+        this.state.scene = "seat";
+        this.audio.sting("tick");
+        this.render();
+      }
       if (act === "to-tablet") {
         this.state.scene = "tablet";
         this.audio.sting("tick");
@@ -423,6 +558,13 @@ export class Game {
         if (n !== null) this.lock(n);
       }
       if (act === "next" || act === "ending") this.advance();
+      if (act === "reward") {
+        this.state.scars = [...new Set([...this.state.scars, ...this.state.hurt])];
+        this.state.scene = "reward";
+        this.audio.sting("card");
+        this.render();
+      }
+      if (act === "boon" && button.dataset.id) this.takeBoon(button.dataset.id as BoonId);
       if (act === "retry") this.retry();
       if (act === "title") this.toTitle();
     };

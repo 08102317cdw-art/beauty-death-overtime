@@ -13,8 +13,8 @@ export function renderEnding(ending: Ending, seats: Seat[]): string {
       <p class="eyebrow"><span class="latin">Game clear</span></p>
       <h2>加冕文书</h2>
       <p class="ending-name">${esc(ending.name)}</p>
-      <p class="ending-epitaph">庭上只剩你的数字。天平不再需要别人。</p>
-      <p class="ending-body">皇冠在这里不是奖品，是一张允许你离开的文书。方块王若还在，会说这不公平；他已不在，所以公平由你带走。</p>
+      <p class="ending-epitaph">三场都走完了。庭上只剩你的数字。</p>
+      <p class="ending-body">皇冠在这里不是奖品，是一张允许你离开巡回的文书。方块王若还在，会说这不公平；第三庭已经关了门。</p>
       ${fallen ? `<p class="ending-fallen">已溶：${esc(fallen)}</p>` : ""}
       <dl class="ending-meta">
         <div><dt>结局</dt><dd>GAME CLEAR</dd></div>
@@ -32,8 +32,8 @@ export function renderEnding(ending: Ending, seats: Seat[]): string {
     <h2>除名文书</h2>
     <div class="obit-rule"></div>
     <p class="ending-name">${esc(ending.name)}</p>
-    <p class="ending-epitaph">你的分数被溶到了 ${player ? scoreText(player.score) : "−10"}。王水不关心你算得对不对。</p>
-    <p class="ending-body">委员会把你的编号让给下一张空白。活着的人会继续把平均乘以 0.8，好像椅子从未空过。</p>
+    <p class="ending-epitaph">你倒在第 ${ending.trial} 庭，分数溶到了 ${player ? scoreText(player.score) : "−10"}。</p>
+    <p class="ending-body">王水不关心你算得对不对。后面的庭还亮着，只是没有你的椅子。</p>
     ${fallen ? `<p class="ending-fallen">同庭已溶：${esc(fallen)}</p>` : ""}
     <dl class="ending-meta">
       <div><dt>结局</dt><dd>GAME OVER</dd></div>

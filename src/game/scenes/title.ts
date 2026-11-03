@@ -10,7 +10,7 @@ export function renderTitle(seed: string, name: string, lastLine: string): strin
         <span class="rule-break"></span>
         <span class="line line-sub">死亡加时赛</span>
       </h1>
-      <p class="tagline">不是比谁好看。是比谁更懂别人有多懂。</p>
+      <p class="tagline">三场巡回。不是比谁好看，是比谁更懂别人有多懂。</p>
       <p class="tagline-en latin">A number is a face. The average is a jury.</p>
       ${lastLine ? `<p class="last-run">${esc(lastLine)}</p>` : ""}
     </div>
@@ -28,10 +28,10 @@ export function renderTitle(seed: string, name: string, lastLine: string): strin
           <input name="seed" maxlength="24" autocomplete="off" spellcheck="false" value="${esc(seed)}" />
         </label>
         <div class="slip-actions">
-          <button type="submit">入座</button>
+          <button type="submit">领取签证</button>
           <button type="button" class="texty" data-act="random-seed">换号</button>
         </div>
-        <p class="slip-note">平板只收整数。天平只认远近。</p>
+        <p class="slip-note">前两场抽人。方块王只在第三庭进门。</p>
       </form>
     </div>
   </section>`;
@@ -42,7 +42,7 @@ export function renderSeat(beam: string, row: string): string {
     <header class="scene-head">
       <p class="eyebrow"><span class="latin">Take the bench</span></p>
       <h2>入座</h2>
-      <p class="lede">五把椅子，一架天平。方块王坐在你右侧第一席。他说离你近一点，才好谈公平。</p>
+      <p class="lede">五把椅子，一架天平。这一庭先没有王。读完他们的习惯，再把数字放上平板。</p>
     </header>
     <div class="court-top">${beam}${row}</div>
     <div class="ceremony-actions"><button type="button" class="btn" data-act="to-tablet">坐下</button></div>

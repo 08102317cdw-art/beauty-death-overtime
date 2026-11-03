@@ -1,4 +1,5 @@
 import type { Seat } from "../types";
+import { depthBand } from "../systems/tour";
 import { esc, scoreText } from "./format";
 import { diamondMark } from "./ornaments";
 import { portraitSVG } from "./portrait";
@@ -12,7 +13,7 @@ export function bench(seats: Seat[]): string {
         <div class="chain"></div>
         <div class="portrait-frame portrait-sm ${seat.alive ? "" : "is-dead"} ${seat.id === "player" ? "is-player" : ""}">${portraitSVG(seat.look)}</div>
         <div class="pan-name">${king}${esc(seat.name)}</div>
-        <div class="pan-role">${esc(seat.epithet)}</div>
+        <div class="pan-role">${esc(seat.epithet)}${seat.scarred ? " · 疤" : ""}${seat.revealed ? ` · ${depthBand(seat.depth)}` : ""}</div>
         <b class="latin pan-score">${seat.alive ? scoreText(seat.score) : "除名"}</b>
       </div>`;
     })
