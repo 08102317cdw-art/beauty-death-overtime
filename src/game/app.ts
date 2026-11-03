@@ -1,25 +1,29 @@
 import { AudioDirector } from "./audio";
-import { buildEnding } from "./content/epitaphs";
-import { renderBriefing } from "./scenes/briefing";
+import { createSeats } from "./content/cast";
+import { renderChoose } from "./scenes/choose";
+import { renderDecree } from "./scenes/decree";
 import { renderEnding } from "./scenes/ending";
-import { renderResolution } from "./scenes/resolution";
-import { renderRound } from "./scenes/round";
-import { renderTitle } from "./scenes/title";
-import { renderVisa } from "./scenes/visa";
+import { renderSeat, renderTablet, renderTitle } from "./scenes/title";
+import { renderVerdict } from "./scenes/verdict";
 import { randomSeed } from "./rng";
-import { createRun, playRound, playerDecisionOrFreeze } from "./systems/run";
-import { roundSeconds } from "./systems/scoring";
-import type { AudienceId, GameState, StrategyId, Suit } from "./types";
+import {
+  aiNumber,
+  applyOutcome,
+  resolveRound,
+  rulesNow,
+  turnSeconds,
+  unlockedClauses,
+} from "./systems/contest";
+import type { ClauseId, Ending, RoundOutcome, SceneId, Seat } from "./types";
+import { bench } from "./ui/bench";
 import { startDust } from "./ui/dust";
 import { esc } from "./ui/format";
-import { muteIcon, suitMark } from "./ui/ornaments";
+import { clock } from "./ui/format";
+import { muteIcon, scalesBeam } from "./ui/ornaments";
 
 const STORE = "bdo-last";
 
 interface LastRun {
-  seed: string;
-  name: string;
-  win: boolean;
   line: string;
 }
 
@@ -34,64 +38,74 @@ function readLast(): string {
   }
 }
 
-function writeLast(data: LastRun): void {
+function writeLast(line: string): void {
   try {
-    localStorage.setItem(STORE, JSON.stringify(data));
+    localStorage.setItem(STORE, JSON.stringify({ line }));
   } catch {
-    /* ignore quota / private mode */
+    /* ignore */
   }
 }
 
-function initialState(): GameState {
+interface State {
+  scene: SceneId;
+  seed: string;
+  playerName: string;
+  seats: Seat[];
+  round: number;
+  eliminated: number;
+  fresh: ClauseId[];
+  draft: string;
+  timerLeft: number;
+  timerMax: number;
+  outcome: RoundOutcome | null;
+  lastDuel: boolean;
+  ending: Ending | null;
+  lastLine: string;
+}
+
+function initial(): State {
   const params = new URLSearchParams(window.location.search);
   const seed = (params.get("seed") ?? "").trim().slice(0, 24) || randomSeed();
   return {
     scene: "title",
     seed,
     playerName: "七号",
-    suit: null,
-    run: null,
-    briefingRound: 0,
-    beat: 0,
-    pickingRumor: false,
-    socialMode: "ally",
-    pending: {},
-    timerLeft: 56,
-    timerMax: 56,
-    resolutionRound: null,
+    seats: [],
+    round: 1,
+    eliminated: 0,
+    fresh: [],
+    draft: "",
+    timerLeft: 0,
+    timerMax: 0,
+    outcome: null,
+    lastDuel: false,
     ending: null,
-    lastRunLine: readLast(),
+    lastLine: readLast(),
   };
 }
 
-function sceneLabel(state: GameState): string {
-  switch (state.scene) {
+function sceneLabel(scene: SceneId): string {
+  switch (scene) {
     case "title":
-      return "入境处";
-    case "visa":
-      return "签证";
-    case "briefing":
-      return state.briefingRound === 0 ? "候场" : "加时预告";
-    case "round":
-      return state.briefingRound === 0 ? "第一幕" : "加时赛";
-    case "resolution":
-      return "结算";
+      return "庭门";
+    case "seat":
+      return "入座";
+    case "tablet":
+      return "平板";
+    case "decree":
+      return "宣读";
+    case "choose":
+      return "落子";
+    case "verdict":
+      return "宣判";
     case "ending":
-      return state.ending?.win ? "加冕" : "终场";
+      return "终局";
   }
-}
-
-function footHint(state: GameState): string {
-  if (state.scene === "round") return "超时未完成三拍，名次沉底";
-  if (state.scene === "visa") return "一张签证，一种死法";
-  if (state.scene === "resolution") return "账是公开的，申诉不是";
-  return "灯光部可以先走";
 }
 
 export class Game {
   readonly audio = new AudioDirector();
-  state: GameState = initialState();
-  muted = this.audio.muted;
+  state: State = initial();
   private readonly root: HTMLElement;
   private readonly quiet: boolean;
   private timerHandle = 0;
@@ -100,8 +114,6 @@ export class Game {
   private locked = false;
   private dustStop: (() => void) | null = null;
   private cleanups: Array<() => void> = [];
-  private selectedSuit: Suit | null = null;
-  private clickGuard = 0;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -117,14 +129,6 @@ export class Game {
     this.render();
   }
 
-  setSeed(seed: string): void {
-    this.state.seed = seed.trim().slice(0, 24);
-  }
-
-  setName(name: string): void {
-    this.state.playerName = name.trim().slice(0, 8);
-  }
-
   randomizeSeed(): void {
     this.state.seed = randomSeed();
     const input = this.root.querySelector<HTMLInputElement>('input[name="seed"]');
@@ -133,232 +137,167 @@ export class Game {
     if (serial) serial.textContent = this.state.seed;
   }
 
-  goVisa(): void {
-    const form = this.root.querySelector<HTMLFormElement>("#visa-form");
+  enter(): void {
+    const form = this.root.querySelector<HTMLFormElement>("#case-form");
     if (form) {
       const data = new FormData(form);
-      this.setName(String(data.get("name") ?? ""));
-      const seed = String(data.get("seed") ?? "").trim();
-      this.state.seed = seed.slice(0, 24) || randomSeed();
+      const name = String(data.get("name") ?? "").trim().slice(0, 8);
+      const seed = String(data.get("seed") ?? "").trim().slice(0, 24);
+      this.state.playerName = name || "七号";
+      this.state.seed = seed || randomSeed();
     }
-    if (!this.state.playerName) this.state.playerName = "七号";
-    this.selectedSuit = null;
-    this.state.scene = "visa";
+    this.state.seats = createSeats(this.state.playerName);
+    this.state.round = 1;
+    this.state.eliminated = 0;
+    this.state.fresh = [];
+    this.state.outcome = null;
+    this.state.ending = null;
+    this.state.scene = "seat";
     this.audio.unlock();
     this.audio.sting("card");
     this.render();
   }
 
-  chooseSuit(suit: Suit): void {
-    this.state.suit = suit;
-    this.state.run = createRun(this.state.seed, this.state.playerName || "七号", suit);
-    this.state.briefingRound = 0;
-    this.state.scene = "briefing";
-    this.audio.sting("card");
-    this.render();
-  }
-
-  beginRound(): void {
-    const run = this.state.run;
-    if (!run) return;
-    const roundIndex = this.state.briefingRound;
-    const rule = roundIndex === 0 ? run.rule1 : run.ruleOT;
-    const seconds = roundSeconds(roundIndex, rule.id);
-    this.state.beat = 0;
-    this.state.pickingRumor = false;
-    this.state.socialMode = "ally";
-    this.state.pending = {};
-    this.state.timerMax = seconds;
-    this.state.timerLeft = seconds;
-    this.timerRunning = false;
-    this.state.scene = "round";
-    this.audio.sting("tick");
-    this.render();
-  }
-
-  private acceptClick(): boolean {
-    return performance.now() >= this.clickGuard;
-  }
-
-  private armClick(): void {
-    this.clickGuard = performance.now() + 280;
-  }
-
-  pickStrategy(id: StrategyId): void {
-    if (this.state.scene !== "round" || this.locked || this.state.beat !== 0 || !this.acceptClick()) return;
-    this.armClick();
-    this.state.pending.strategy = id;
-    this.state.beat = 1;
-    this.state.pickingRumor = false;
-    this.audio.sting("tick");
-    this.render();
-  }
-
-  pickAudience(id: AudienceId): void {
-    if (this.state.scene !== "round" || this.locked || this.state.beat !== 1 || this.state.pickingRumor || !this.acceptClick()) return;
-    this.armClick();
-    if (id === "rumor") {
-      this.state.pending.audience = "rumor";
-      this.state.pending.rumorTarget = null;
-      this.state.pickingRumor = true;
-      this.audio.sting("tick");
-      this.render();
-      return;
-    }
-    this.state.pending.audience = id;
-    this.state.pending.rumorTarget = null;
-    this.state.beat = 2;
-    this.audio.sting("tick");
-    this.render();
-  }
-
-  pickRumor(id: string): void {
-    if (!this.state.pickingRumor || this.locked || !this.acceptClick()) return;
-    this.armClick();
-    this.state.pending.audience = "rumor";
-    this.state.pending.rumorTarget = id;
-    this.state.pickingRumor = false;
-    this.state.beat = 2;
-    this.audio.sting("tick");
-    this.render();
-  }
-
-  cancelRumor(): void {
-    if (!this.state.pickingRumor) return;
-    delete this.state.pending.audience;
-    this.state.pending.rumorTarget = null;
-    this.state.pickingRumor = false;
-    this.render();
-  }
-
-  setSocialMode(mode: "ally" | "betray"): void {
-    this.state.socialMode = mode;
-    this.root.querySelectorAll<HTMLButtonElement>("[data-act=social-mode]").forEach((button) => {
-      button.classList.toggle("is-on", button.dataset.mode === mode);
-    });
-    const hint = this.root.querySelector("#social-hint");
-    if (hint) {
-      hint.textContent = mode === "ally"
-        ? "把手递出去。双向握住才是盟。单方面，只算你伸过。"
-        : "只有盟约才值得背叛。没有盟的刀，看起来像慌。";
-    }
-  }
-
-  pickSocialTarget(id: string): void {
-    if (this.state.scene !== "round" || this.state.beat !== 2 || this.locked || !this.acceptClick()) return;
-    this.armClick();
-    this.state.pending.social = this.state.socialMode;
-    this.state.pending.socialTarget = id;
-    this.resolvePending(false);
-  }
-
-  pickAbstain(): void {
-    if (this.state.scene !== "round" || this.state.beat !== 2 || this.locked || !this.acceptClick()) return;
-    this.armClick();
-    this.state.pending.social = "abstain";
-    this.state.pending.socialTarget = null;
-    this.resolvePending(false);
-  }
-
-  continueAfterResolution(): void {
-    if (!this.acceptClick()) return;
-    const run = this.state.run;
-    const index = this.state.resolutionRound;
-    if (!run || index === null) return;
-    const player = run.roster.find((c) => c.isPlayer);
-    if (!player?.alive) {
-      this.finish();
-      return;
-    }
-    if (index === 0) {
-      this.state.briefingRound = 1;
-      this.state.scene = "briefing";
-      this.audio.sting("card");
-      this.render();
-      return;
-    }
-    this.finish();
-  }
-
-  retrySame(): void {
-    if (!this.state.suit) {
-      this.backToTitle();
-      return;
-    }
-    this.audio.setPulse(false);
-    this.state.run = createRun(this.state.seed, this.state.playerName || "七号", this.state.suit);
-    this.state.briefingRound = 0;
-    this.state.ending = null;
-    this.state.resolutionRound = null;
-    this.state.pending = {};
-    this.state.scene = "briefing";
-    this.audio.sting("card");
-    this.render();
-  }
-
-  backToTitle(): void {
-    this.audio.setPulse(false);
-    this.state.scene = "title";
-    this.state.run = null;
-    this.state.suit = null;
-    this.state.ending = null;
-    this.state.resolutionRound = null;
-    this.state.pending = {};
-    this.state.lastRunLine = readLast();
-    this.render();
-  }
-
   toggleMute(): void {
     this.audio.toggle();
-    this.muted = this.audio.muted;
     const button = this.root.querySelector<HTMLButtonElement>("#mute");
     if (!button) return;
-    button.classList.toggle("is-muted", this.muted);
-    button.setAttribute("aria-pressed", String(this.muted));
-    button.setAttribute("aria-label", this.muted ? "打开声音" : "关闭声音");
-    button.innerHTML = muteIcon(this.muted);
+    button.classList.toggle("is-muted", this.audio.muted);
+    button.setAttribute("aria-pressed", String(this.audio.muted));
+    button.setAttribute("aria-label", this.audio.muted ? "打开声音" : "关闭声音");
+    button.innerHTML = muteIcon(this.audio.muted);
   }
 
-  private finish(): void {
-    const run = this.state.run;
-    if (!run) return;
-    const ending = buildEnding(run);
-    this.state.ending = ending;
-    this.state.scene = "ending";
-    writeLast({
-      seed: run.seed,
-      name: ending.name,
-      win: ending.win,
-      line: ending.win
-        ? `上一张签证 · ${ending.name} · 冠军 · ${run.seed}`
-        : `上一张签证 · ${ending.name} · ${ending.placeLabel}`,
-    });
-    this.state.lastRunLine = readLast();
-    this.audio.setPulse(false);
-    this.audio.sting(ending.win ? "crown" : "death");
+  private beginRound(): void {
+    const seconds = turnSeconds(this.state.round, this.state.fresh.length > 0);
+    this.state.draft = "";
+    this.state.timerMax = seconds;
+    this.state.timerLeft = seconds;
+    this.state.outcome = null;
+    this.timerRunning = false;
+    this.state.scene = "choose";
+    this.audio.sting("tick");
     this.render();
   }
 
-  private resolvePending(timedOut: boolean): void {
-    const run = this.state.run;
-    if (!run || this.locked || this.state.scene !== "round") return;
+  private lock(number: number | null): void {
+    if (this.locked || this.state.scene !== "choose") return;
     this.locked = true;
     this.stopTimer();
-    const decision = playerDecisionOrFreeze(this.state.pending, timedOut);
-    const record = playRound(run, this.state.briefingRound, decision);
-    this.state.resolutionRound = record.index;
-    this.state.scene = "resolution";
-    this.audio.setPulse(false);
-    this.audio.sting(record.eliminated.includes("player") ? "death" : "stamp");
+    const { seats, round, eliminated, seed } = this.state;
+    const alive = seats.filter((seat) => seat.alive);
+    const duel = rulesNow(eliminated, alive.length).duel;
+    const submitted = alive.map((seat) => ({
+      id: seat.id,
+      number: seat.role === "player" ? number : aiNumber(seat.role, seed, round, duel),
+    }));
+    const outcome = resolveRound(seats, submitted, eliminated);
+    const before = eliminated;
+    applyOutcome(seats, outcome);
+    const after = seats.filter((seat) => !seat.alive).length;
+    const fresh = unlockedClauses(before, after);
+    this.state.outcome = outcome;
+    this.state.lastDuel = duel;
+    this.state.eliminated = after;
+    this.state.fresh = fresh;
+    this.state.scene = "verdict";
+    const playerDead = outcome.eliminatedIds.includes("player");
+    this.audio.sting(playerDead ? "death" : outcome.eliminatedIds.length ? "stamp" : "card");
     this.locked = false;
     this.render();
+  }
+
+  private advance(): void {
+    const player = this.state.seats.find((seat) => seat.id === "player");
+    const alive = this.state.seats.filter((seat) => seat.alive);
+    if (!player?.alive) {
+      this.finish(false);
+      return;
+    }
+    if (alive.length === 1) {
+      this.finish(true);
+      return;
+    }
+    this.state.round += 1;
+    this.beginRound();
+  }
+
+  private finish(win: boolean): void {
+    const player = this.state.seats.find((seat) => seat.id === "player");
+    this.state.ending = { win, name: player?.name ?? "七号", seed: this.state.seed };
+    this.state.scene = "ending";
+    const line = win
+      ? `上一案 · ${this.state.ending.name} · GAME CLEAR · ${this.state.seed}`
+      : `上一案 · ${this.state.ending.name} · GAME OVER · ${this.state.seed}`;
+    writeLast(line);
+    this.state.lastLine = line;
+    this.audio.sting(win ? "crown" : "death");
+    this.render();
+  }
+
+  private retry(): void {
+    this.state.seats = createSeats(this.state.playerName);
+    this.state.round = 1;
+    this.state.eliminated = 0;
+    this.state.fresh = [];
+    this.state.outcome = null;
+    this.state.ending = null;
+    this.state.scene = "seat";
+    this.audio.sting("card");
+    this.render();
+  }
+
+  private toTitle(): void {
+    this.stopTimer();
+    this.state.scene = "title";
+    this.state.ending = null;
+    this.state.lastLine = readLast();
+    this.render();
+  }
+
+  private currentNumber(): number | null {
+    if (this.state.draft.trim() === "") return null;
+    const n = Number(this.state.draft);
+    if (!Number.isInteger(n) || n < 0 || n > 100) return null;
+    return n;
+  }
+
+  private setDraft(value: string): void {
+    this.state.draft = value;
+    this.paintDraft();
+  }
+
+  private nudge(by: number): void {
+    const current = this.currentNumber() ?? 0;
+    const next = Math.max(0, Math.min(100, current + by));
+    this.setDraft(String(next));
+  }
+
+  private paintDraft(): void {
+    const n = this.currentNumber();
+    const num = this.root.querySelector("#pick-num");
+    const fill = this.root.querySelector<HTMLElement>("#ruler-fill");
+    const thumb = this.root.querySelector<HTMLElement>("#ruler-thumb");
+    const button = this.root.querySelector<HTMLButtonElement>("[data-act=lock]");
+    if (num) {
+      num.textContent = n === null ? "未选" : String(n);
+      num.classList.toggle("is-empty", n === null);
+    }
+    if (fill) fill.style.width = n === null ? "0%" : `${n}%`;
+    if (thumb) {
+      thumb.style.left = n === null ? "0%" : `${n}%`;
+      thumb.style.opacity = n === null ? "0" : "1";
+    }
+    if (button) button.disabled = n === null;
+    const ruler = this.root.querySelector("#ruler");
+    if (ruler && n !== null) ruler.setAttribute("aria-valuenow", String(n));
   }
 
   private startTimer(): void {
     this.stopTimer();
     this.timerStartedAt = performance.now();
     this.timerRunning = true;
-    this.timerHandle = window.setInterval(() => this.tickTimer(), 100);
+    this.timerHandle = window.setInterval(() => this.tick(), 100);
   }
 
   private stopTimer(): void {
@@ -367,18 +306,19 @@ export class Game {
       window.clearInterval(this.timerHandle);
       this.timerHandle = 0;
     }
+    this.audio.setPulse(false);
   }
 
-  private tickTimer(): void {
-    if (!this.timerRunning || this.state.scene !== "round") return;
+  private tick(): void {
+    if (!this.timerRunning || this.state.scene !== "choose") return;
     const left = Math.max(0, this.state.timerMax - (performance.now() - this.timerStartedAt) / 1000);
     this.state.timerLeft = left;
     this.paintTimer();
-    this.audio.setPulse(left <= 10 && left > 0);
+    this.audio.setPulse(left > 0 && left <= 10);
     if (left <= 0) {
       this.timerRunning = false;
       this.stopTimer();
-      this.resolvePending(true);
+      this.lock(null);
     }
   }
 
@@ -386,14 +326,11 @@ export class Game {
     const num = this.root.querySelector("#timer-num");
     const ring = this.root.querySelector<SVGCircleElement>("#timer-ring");
     const timer = this.root.querySelector("#timer");
-    const stage = this.root.querySelector(".stage");
     const ratio = this.state.timerMax <= 0 ? 0 : this.state.timerLeft / this.state.timerMax;
     const offset = 100.53 * (1 - Math.max(0, Math.min(1, ratio)));
-    if (num) num.textContent = String(Math.ceil(this.state.timerLeft));
+    if (num) num.textContent = clock(this.state.timerLeft);
     if (ring) ring.style.strokeDashoffset = offset.toFixed(2);
-    const late = this.state.timerLeft <= 10;
-    timer?.classList.toggle("is-late", late);
-    stage?.classList.toggle("is-late", late);
+    timer?.classList.toggle("is-late", this.state.timerLeft <= 10);
   }
 
   private render(): void {
@@ -401,17 +338,29 @@ export class Game {
     this.cleanups = [];
     this.dustStop?.();
     this.dustStop = null;
-
     const state = this.state;
+    const beam = scalesBeam();
+    const row = state.seats.length ? bench(state.seats) : "";
+    const showBench = state.scene === "choose" || state.scene === "verdict";
     let scene = "";
-    if (state.scene === "title") scene = renderTitle(state);
-    else if (state.scene === "visa") scene = renderVisa();
-    else if (state.scene === "briefing") scene = renderBriefing(state);
-    else if (state.scene === "round") scene = renderRound(state);
-    else if (state.scene === "resolution") scene = renderResolution(state);
-    else scene = renderEnding(state);
+    if (state.scene === "title") scene = renderTitle(state.seed, state.playerName, state.lastLine);
+    else if (state.scene === "seat") scene = renderSeat(beam, bench(state.seats));
+    else if (state.scene === "tablet") scene = renderTablet();
+    else if (state.scene === "decree") scene = renderDecree();
+    else if (state.scene === "choose") {
+      const active = (["duplicate", "exact", "duel"] as ClauseId[]).filter((id) => {
+        if (id === "duplicate") return state.eliminated >= 1;
+        if (id === "exact") return state.eliminated >= 2;
+        return state.eliminated >= 3;
+      });
+      const long = state.round <= 1 || state.fresh.length > 0;
+      scene = renderChoose(state.round, active, long, state.timerLeft, state.timerMax);
+    } else if (state.scene === "verdict" && state.outcome) {
+      const playerAlive = state.seats.some((seat) => seat.id === "player" && seat.alive);
+      const onlyPlayer = state.seats.filter((seat) => seat.alive).every((seat) => seat.id === "player");
+      scene = renderVerdict(state.seats, state.outcome, state.round, state.lastDuel, state.fresh, playerAlive, onlyPlayer);
+    } else if (state.ending) scene = renderEnding(state.ending, state.seats);
 
-    const suit = state.run?.suit;
     const win = state.ending?.win === true;
     this.root.innerHTML = `<div class="stage ${this.quiet ? "is-quiet" : ""}" data-scene="${state.scene}" data-win="${win ? "true" : "false"}">
       <canvas id="dust"></canvas>
@@ -419,32 +368,34 @@ export class Game {
       <div class="vignette"></div>
       <svg class="grain" aria-hidden="true"><filter id="grain-filter"><feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="2" stitchTiles="stitch"/></filter><rect width="100%" height="100%" filter="url(#grain-filter)"/></svg>
       <div class="binding"></div>
-      ${suit ? `<div class="watermark suit-${suit}">${suitMark(suit, 340)}</div>` : ""}
       <header class="topbar">
         <div class="brand">选美 <span class="latin">/ Death Overtime</span></div>
-        <div class="top-center">${sceneLabel(state)}</div>
+        <div class="top-center">${sceneLabel(state.scene)}</div>
         <div class="top-right">
           <span class="latin seed-chip">${esc(state.seed)}</span>
-          <button type="button" id="mute" class="${this.muted ? "is-muted" : ""}" aria-pressed="${this.muted}" aria-label="${this.muted ? "打开声音" : "关闭声音"}">${muteIcon(this.muted)}</button>
+          <button type="button" id="mute" class="${this.audio.muted ? "is-muted" : ""}" aria-pressed="${this.audio.muted}" aria-label="${this.audio.muted ? "打开声音" : "关闭声音"}">${muteIcon(this.audio.muted)}</button>
         </div>
       </header>
-      <main class="scene scene-in">${scene}</main>
+      <main class="scene scene-in">
+        ${showBench ? `<div class="court-top">${beam}${row}</div>` : ""}
+        ${scene}
+      </main>
       <footer class="foot">
-        <span>委员会不接受申诉</span>
-        <span class="latin">No appeals</span>
-        <span>${footHint(state)}</span>
+        <span>负十除名</span>
+        <span class="latin">King of diamonds</span>
+        <span>王水只溶名字</span>
       </footer>
     </div>`;
 
     const canvas = this.root.querySelector<HTMLCanvasElement>("#dust");
     if (canvas) this.dustStop = startDust(canvas, this.quiet);
     this.bind();
-    if (state.scene === "round") {
+    if (state.scene === "choose") {
+      this.paintDraft();
       if (!this.timerRunning) this.startTimer();
       else this.paintTimer();
     } else {
       this.stopTimer();
-      this.audio.setPulse(false);
     }
   }
 
@@ -455,37 +406,34 @@ export class Game {
       if (!button) return;
       const act = button.dataset.act;
       if (act === "random-seed") this.randomizeSeed();
-      if (act === "back-title") this.backToTitle();
-      if (act === "select-suit") {
-        const suit = button.dataset.suit as Suit;
-        this.selectedSuit = suit;
-        this.root.querySelectorAll<HTMLElement>("[data-act=select-suit]").forEach((card) => {
-          card.classList.toggle("is-selected", card === button);
-        });
-        const confirm = this.root.querySelector<HTMLButtonElement>("[data-act=confirm-suit]");
-        if (confirm) confirm.disabled = false;
+      if (act === "to-tablet") {
+        this.state.scene = "tablet";
         this.audio.sting("tick");
+        this.render();
       }
-      if (act === "confirm-suit" && this.selectedSuit) this.chooseSuit(this.selectedSuit);
-      if (act === "begin-round") this.beginRound();
-      if (act === "strategy") this.pickStrategy(button.dataset.id as StrategyId);
-      if (act === "audience") this.pickAudience(button.dataset.id as AudienceId);
-      if (act === "rumor-target" && button.dataset.id) this.pickRumor(button.dataset.id);
-      if (act === "cancel-rumor") this.cancelRumor();
-      if (act === "social-mode") this.setSocialMode(button.dataset.mode === "betray" ? "betray" : "ally");
-      if (act === "social-target" && button.dataset.id) this.pickSocialTarget(button.dataset.id);
-      if (act === "abstain") this.pickAbstain();
-      if (act === "continue") this.continueAfterResolution();
-      if (act === "retry-same") this.retrySame();
+      if (act === "to-decree") {
+        this.state.scene = "decree";
+        this.audio.sting("card");
+        this.render();
+      }
+      if (act === "begin") this.beginRound();
+      if (act === "nudge") this.nudge(Number(button.dataset.by ?? 0));
+      if (act === "lock") {
+        const n = this.currentNumber();
+        if (n !== null) this.lock(n);
+      }
+      if (act === "next" || act === "ending") this.advance();
+      if (act === "retry") this.retry();
+      if (act === "title") this.toTitle();
     };
     this.root.addEventListener("click", onClick);
     this.cleanups.push(() => this.root.removeEventListener("click", onClick));
 
-    const form = this.root.querySelector<HTMLFormElement>("#visa-form");
+    const form = this.root.querySelector<HTMLFormElement>("#case-form");
     if (form) {
       const onSubmit = (event: Event) => {
         event.preventDefault();
-        this.goVisa();
+        this.enter();
       };
       form.addEventListener("submit", onSubmit);
       this.cleanups.push(() => form.removeEventListener("submit", onSubmit));
@@ -511,25 +459,57 @@ export class Game {
       this.cleanups.push(() => mute.removeEventListener("click", onMute));
     }
 
-    if (this.state.scene === "round" || this.state.scene === "visa") {
+    const ruler = this.root.querySelector<HTMLElement>("#ruler");
+    if (ruler) {
+      const pick = (clientX: number) => {
+        const rect = ruler.getBoundingClientRect();
+        const t = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        this.setDraft(String(Math.round(t * 100)));
+      };
+      const onPointer = (event: PointerEvent) => {
+        ruler.setPointerCapture(event.pointerId);
+        pick(event.clientX);
+      };
+      const onMove = (event: PointerEvent) => {
+        if (event.buttons === 0 && event.pointerType === "mouse") return;
+        pick(event.clientX);
+      };
+      ruler.addEventListener("pointerdown", onPointer);
+      ruler.addEventListener("pointermove", onMove);
+      this.cleanups.push(() => {
+        ruler.removeEventListener("pointerdown", onPointer);
+        ruler.removeEventListener("pointermove", onMove);
+      });
+    }
+
+    if (this.state.scene === "choose") {
       const onKey = (event: KeyboardEvent) => {
         const target = event.target as HTMLElement | null;
         if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
-        if ((event.key === "Escape" || event.key === "Backspace") && this.state.pickingRumor) {
+        if (event.key >= "0" && event.key <= "9") {
           event.preventDefault();
-          this.cancelRumor();
+          const next = `${this.state.draft}${event.key}`.replace(/^0+(?=\d)/, "");
+          const value = Number(next);
+          if (Number.isInteger(value) && value <= 100) this.setDraft(next === "" ? "0" : String(value));
           return;
         }
-        if (event.key === "Enter" && this.state.scene === "visa" && this.selectedSuit) {
+        if (event.key === "Backspace") {
           event.preventDefault();
-          this.chooseSuit(this.selectedSuit);
+          this.setDraft(this.state.draft.slice(0, -1));
           return;
         }
-        const key = event.key.toLowerCase();
-        const button = this.root.querySelector<HTMLButtonElement>(`[data-key="${key}"]`);
-        if (button && !button.disabled) {
+        if (event.key === "Enter") {
+          const n = this.currentNumber();
+          if (n !== null) this.lock(n);
+          return;
+        }
+        if (event.key === "ArrowUp" || event.key === "ArrowRight") {
           event.preventDefault();
-          button.click();
+          this.nudge(1);
+        }
+        if (event.key === "ArrowDown" || event.key === "ArrowLeft") {
+          event.preventDefault();
+          this.nudge(-1);
         }
       };
       document.addEventListener("keydown", onKey);

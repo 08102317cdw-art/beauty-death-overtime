@@ -1,201 +1,188 @@
-import { cloneRun, createRun, playRound } from "./run";
-import type { AudienceId, Decision, Run, StrategyId, Suit } from "../types";
+import { createSeats } from "../content/cast";
+import type { ClauseId, Seat, Submitted } from "../types";
+import {
+  aiNumber,
+  applyOutcome,
+  converge,
+  DIGEST_SECONDS,
+  resolveRound,
+  TURN_SECONDS,
+  unlockedClauses,
+  withoutBlame,
+} from "./contest";
 
-const SUITS: Suit[] = ["spades", "hearts", "diamonds", "clubs"];
-const STRATS: StrategyId[] = ["glamour", "craft", "scandal", "borrow"];
-
-function others(run: Run) {
-  return run.roster.filter((c) => c.alive && !c.isPlayer);
+function assert(cond: boolean, message: string): void {
+  if (!cond) throw new Error(message);
 }
 
-function decide(run: Run, round: 0 | 1, mode: "read" | "bad" | "freeze"): Decision {
-  if (mode === "freeze") {
-    return {
-      strategy: "freeze",
-      audience: "freeze",
-      rumorTarget: null,
-      social: "abstain",
-      socialTarget: null,
-      timedOut: true,
-    };
-  }
-  const player = run.roster.find((c) => c.isPlayer)!;
-  const rule = round === 0 ? run.rule1 : run.ruleOT;
-  const aliveOthers = others(run);
-  const saint = aliveOthers.find((c) => c.personality === "saint");
-  const craft = aliveOthers.find((c) => c.personality === "craft");
-  const schemer = aliveOthers.find((c) => c.personality === "schemer");
-  const linked = new Set(
-    run.alliances.filter((p) => p.from === "player" || p.to === "player").map((p) => (p.from === "player" ? p.to : p.from)),
-  );
-
-  if (mode === "bad") {
-    const target = aliveOthers[0];
-    return {
-      strategy: "scandal",
-      audience: "rumor",
-      rumorTarget: saint?.id ?? target?.id ?? null,
-      social: "betray",
-      socialTarget: target?.id ?? null,
-      timedOut: false,
-    };
-  }
-
-  let strategy: StrategyId = player.acting >= player.popularity ? "craft" : "glamour";
-  if (rule.id === "public_lie") strategy = run.lieRecommend === "glamour" ? "craft" : "glamour";
-  else if (rule.id === "hot_light") strategy = "glamour";
-  else if (rule.id === "lens_hunger") strategy = player.acting >= player.popularity ? "craft" : "glamour";
-  else if (rule.id === "dirt_window" || rule.id === "showdown_dirt") strategy = "scandal";
-  else if (rule.id === "handshake" || rule.id === "chain_letter") strategy = "borrow";
-  else if (rule.id === "smile_tax") strategy = player.dirt >= 36 ? "craft" : "glamour";
-
-  let audience: AudienceId = rule.id === "silence_prize" ? "silence" : rule.id === "the_dogs" ? "bribe" : "speech";
-  let social: Decision["social"] = "abstain";
-  let socialTarget: string | null = null;
-  const stab = [...linked].find((id) => {
-    const person = aliveOthers.find((c) => c.id === id);
-    return person && (person.personality === "saint" || person.personality === "schemer");
-  });
-  if (round === 1 && stab) {
-    social = "betray";
-    socialTarget = stab;
-  } else if (rule.id === "handshake" || rule.id === "chain_letter" || (round === 0 && saint)) {
-    social = "ally";
-    socialTarget = (saint ?? craft ?? schemer ?? aliveOthers[0])?.id ?? null;
-  } else if (rule.id === "blood_due" && linked.size === 0 && craft) {
-    social = "ally";
-    socialTarget = craft.id;
-  }
-
+function seatsOf(numbers: Array<[string, number | null]>): { seats: Seat[]; submitted: Submitted[] } {
+  const seats = createSeats("七号").slice(0, numbers.length);
+  // Rebind ids to the provided order while keeping roles off; tests pass explicit ids.
+  const custom: Seat[] = numbers.map(([id], index) => ({
+    ...(seats[index] ?? seats[0]),
+    id,
+    score: 0,
+    alive: true,
+  }));
   return {
-    strategy,
-    audience,
-    rumorTarget: null,
-    social,
-    socialTarget,
-    timedOut: false,
+    seats: custom,
+    submitted: numbers.map(([id, number]) => ({ id, number })),
   };
 }
 
-function enumerate(run: Run): Decision[] {
-  const targets = others(run).map((c) => c.id);
-  const out: Decision[] = [];
-  for (const strategy of STRATS) {
-    for (const audience of ["speech", "bribe", "silence"] as AudienceId[]) {
-      for (const social of ["abstain"] as const) {
-        out.push({ strategy, audience, rumorTarget: null, social, socialTarget: null, timedOut: false });
-      }
-      for (const target of targets) {
-        out.push({ strategy, audience, rumorTarget: null, social: "ally", socialTarget: target, timedOut: false });
-        out.push({ strategy, audience, rumorTarget: null, social: "betray", socialTarget: target, timedOut: false });
-      }
-    }
-    for (const rumorTarget of targets) {
-      out.push({
-        strategy,
-        audience: "rumor",
-        rumorTarget,
-        social: "abstain",
-        socialTarget: null,
-        timedOut: false,
-      });
-      for (const target of targets) {
-        out.push({
-          strategy,
-          audience: "rumor",
-          rumorTarget,
-          social: "ally",
-          socialTarget: target,
-          timedOut: false,
-        });
-      }
-    }
-  }
-  return out;
+function checkFixedRounds(): void {
+  assert(converge(0) === 50, "depth 0");
+  assert(converge(1) === 40, "depth 1");
+  assert(converge(2) === 32, "depth 2");
+  assert(converge(3) === 26, "depth 3");
+  assert(withoutBlame(1, true) === 0, "king refuses 1");
+  assert(withoutBlame(100, true) === 0, "king refuses 100");
+  assert(withoutBlame(32, true) === 32, "king keeps an honest number");
+  assert(DIGEST_SECONDS === 300 && TURN_SECONDS === 60, "timers");
+
+  const basic = seatsOf([
+    ["a", 0],
+    ["b", 20],
+    ["c", 40],
+    ["d", 60],
+    ["e", 80],
+  ]);
+  const basicOut = resolveRound(basic.seats, basic.submitted, 0);
+  assert(basicOut.average === 40, `avg ${basicOut.average}`);
+  assert(basicOut.target === 32, `target ${basicOut.target}`);
+  assert(basicOut.winnerIds.join() === "c", "closest is 40");
+  assert(basicOut.rows.find((row) => row.id === "c")?.delta === 0, "winner holds");
+  assert(basicOut.rows.find((row) => row.id === "a")?.delta === -1, "loser -1");
+
+  const dup = seatsOf([
+    ["a", 40],
+    ["b", 40],
+    ["c", 10],
+    ["d", 20],
+    ["e", 30],
+  ]);
+  const dupOut = resolveRound(dup.seats, dup.submitted, 1);
+  assert(dupOut.rows.filter((row) => row.voidReason === "duplicate").length === 2, "pair void");
+  assert(dupOut.average === 20, `dup avg ${dupOut.average}`);
+  assert(dupOut.target === 16, `dup target ${dupOut.target}`);
+  assert(dupOut.winnerIds.join() === "d", "20 is closest to 16");
+  assert(dupOut.rows.find((row) => row.id === "a")?.delta === -1, "invalid still loses");
+
+  const exact = seatsOf([
+    ["a", 20],
+    ["b", 30],
+    ["c", 24],
+  ]);
+  const exactOut = resolveRound(exact.seats, exact.submitted, 2);
+  assert(exactOut.rounded === 20, `rounded ${exactOut.rounded} target ${exactOut.target}`);
+  assert(exactOut.mode === "exact", "exact mode");
+  assert(exactOut.winnerIds.join() === "a", "20 hits");
+  assert(exactOut.rows.find((row) => row.id === "b")?.delta === -2, "others -2");
+
+  const timeout = seatsOf([
+    ["a", null],
+    ["b", 20],
+    ["c", 30],
+    ["d", 24],
+  ]);
+  const timeoutOut = resolveRound(timeout.seats, timeout.submitted, 2);
+  assert(timeoutOut.rows.find((row) => row.id === "a")?.delta === -1, "timeout stays -1 on an exact round");
+  assert(timeoutOut.rows.find((row) => row.id === "a")?.voidReason === "timeout", "void");
+  assert(!timeoutOut.rows.find((row) => row.id === "a")?.eligible, "timeout out of average");
+
+  const duel = seatsOf([
+    ["a", 0],
+    ["b", 100],
+  ]);
+  const duelOut = resolveRound(duel.seats, duel.submitted, 3);
+  assert(duelOut.mode === "duel", "duel rule");
+  assert(duelOut.winnerIds.join() === "b", "100 wins");
+  assert(duelOut.rows.find((row) => row.id === "a")?.delta === -1, "zero loses the duel");
+  assert(duelOut.average === null, "duel skips the average");
+
+  const low = createSeats("七号");
+  low.forEach((seat) => {
+    seat.score = seat.id === "player" ? -9 : 0;
+  });
+  const drop = resolveRound(
+    low,
+    low.map((seat) => ({ id: seat.id, number: seat.id === "player" ? 0 : 100 })),
+    0,
+  );
+  assert(drop.rows.find((row) => row.id === "player")?.delta === -1, "player should lose this constructed round");
+  assert(drop.eliminatedIds.includes("player"), "−10 eliminates");
 }
 
-function perfect(seed: string, suit: Suit): { r1: boolean; win: boolean } {
-  const base = createRun(seed, "七号", suit);
-  let r1 = false;
-  for (const opening of enumerate(base)) {
-    const mid = cloneRun(base);
-    playRound(mid, 0, opening);
-    if (mid.rounds[0].eliminated.includes("player")) continue;
-    r1 = true;
-    for (const closing of enumerate(mid)) {
-      const fin = cloneRun(mid);
-      playRound(fin, 1, closing);
-      if (fin.rounds[1].winner === "player") return { r1: true, win: true };
+function bestNumber(seats: Seat[], known: Submitted[], eliminated: number): number {
+  let bestN = 0;
+  let bestScore = -Infinity;
+  for (let n = 0; n <= 100; n++) {
+    const outcome = resolveRound(seats, [...known, { id: "player", number: n }], eliminated);
+    const mine = outcome.rows.find((row) => row.id === "player");
+    if (!mine) continue;
+    const dead = outcome.eliminatedIds.includes("player");
+    const hurt = outcome.rows.filter((row) => row.id !== "player").reduce((sum, row) => sum + -Math.min(0, row.delta), 0);
+    const eliminatedOthers = outcome.eliminatedIds.filter((id) => id !== "player").length;
+    const score = (dead ? -1000 : 0) + mine.delta * 30 + eliminatedOthers * 20 + hurt;
+    if (score > bestScore) {
+      bestScore = score;
+      bestN = n;
     }
   }
-  return { r1, win: false };
+  return bestN;
+}
+
+function playSeed(seed: string, perfect: boolean): { win: boolean; saw: ClauseId[]; rounds: number; playerScore: number } {
+  const seats = createSeats("七号");
+  let eliminated = 0;
+  const saw = new Set<ClauseId>();
+  let rounds = 0;
+  while (rounds < 60) {
+    const alive = seats.filter((seat) => seat.alive);
+    const player = alive.find((seat) => seat.id === "player");
+    if (!player) return { win: false, saw: [...saw], rounds, playerScore: seats.find((s) => s.id === "player")?.score ?? -99 };
+    if (alive.length === 1) return { win: true, saw: [...saw], rounds, playerScore: player.score };
+    const duel = eliminated >= 3 && alive.length === 2;
+    const actual = alive
+      .filter((seat) => seat.role !== "player")
+      .map((seat) => ({ id: seat.id, number: aiNumber(seat.role, seed, rounds + 1, duel) }));
+    const assumed = alive
+      .filter((seat) => seat.role !== "player")
+      .map((seat) => ({
+        id: seat.id,
+        number: seat.role === "chaos" && !perfect ? 50 : aiNumber(seat.role, seed, rounds + 1, duel),
+      }));
+    const choice = bestNumber(seats, perfect ? actual : assumed, eliminated);
+    const before = eliminated;
+    const outcome = resolveRound(seats, [...actual, { id: "player", number: choice }], eliminated);
+    applyOutcome(seats, outcome);
+    eliminated = seats.filter((seat) => !seat.alive).length;
+    for (const clause of unlockedClauses(before, eliminated)) saw.add(clause);
+    rounds += 1;
+  }
+  const playerScore = seats.find((seat) => seat.id === "player")?.score ?? -99;
+  const win = seats.filter((seat) => seat.alive).every((seat) => seat.id === "player") && seats.some((seat) => seat.id === "player" && seat.alive);
+  return { win, saw: [...saw], rounds, playerScore };
 }
 
 export function runBalance(): void {
-  const seeds = ["VX-TEST", "VX-7K2Q", "ROSE", "灯", "AAAA", "BORDER", "19", "蜜蜡", "cold", "7777"];
-  let readR1 = 0;
-  let readWin = 0;
-  let badR1 = 0;
-  let freezeR1 = 0;
-  let perfectR1 = 0;
-  let perfectWin = 0;
-  let samples = 0;
-
-  const probe = createRun("VX-TEST", "七号", "diamonds");
-  if (probe.rule1.id === "public_lie") {
-    const obey = cloneRun(probe);
-    const read = cloneRun(probe);
-    const baseDecision: Decision = {
-      strategy: probe.lieRecommend,
-      audience: "speech",
-      rumorTarget: null,
-      social: "abstain",
-      socialTarget: null,
-      timedOut: false,
-    };
-    playRound(obey, 0, baseDecision);
-    playRound(read, 0, { ...baseDecision, strategy: probe.lieRecommend === "glamour" ? "craft" : "glamour" });
-    const gap = (read.rounds[0].scores.player?.rule ?? 0) - (obey.rounds[0].scores.player?.rule ?? 0);
-    if (gap < 12) throw new Error(`public lie swing too small: ${gap}`);
-  }
-
+  checkFixedRounds();
+  const seeds = ["VX-TEST", "ROSE", "AAAA", "灯", "BORDER", "19", "KING", "7777"];
+  let steadyWins = 0;
+  let steadySawDuel = 0;
+  let perfectWins = 0;
   for (const seed of seeds) {
-    for (const suit of SUITS) {
-      samples += 1;
-      const read = createRun(seed, "七号", suit);
-      playRound(read, 0, decide(read, 0, "read"));
-      const survived = !read.rounds[0].eliminated.includes("player");
-      if (survived) {
-        readR1 += 1;
-        playRound(read, 1, decide(read, 1, "read"));
-        if (read.rounds[1].winner === "player") readWin += 1;
-      }
-      const bad = createRun(seed, "七号", suit);
-      playRound(bad, 0, decide(bad, 0, "bad"));
-      if (!bad.rounds[0].eliminated.includes("player")) badR1 += 1;
-      const frozen = createRun(seed, "七号", suit);
-      playRound(frozen, 0, decide(frozen, 0, "freeze"));
-      if (!frozen.rounds[0].eliminated.includes("player")) freezeR1 += 1;
-
-      const solved = perfect(seed, suit);
-      if (solved.r1) perfectR1 += 1;
-      if (solved.win) perfectWin += 1;
-    }
+    const steady = playSeed(seed, false);
+    const perfect = playSeed(seed, true);
+    if (steady.win) steadyWins += 1;
+    if (steady.saw.includes("duel") || steady.saw.includes("duplicate")) steadySawDuel += 1;
+    if (perfect.win) perfectWins += 1;
+    const again = playSeed(seed, false);
+    assert(JSON.stringify(steady) === JSON.stringify(again), `seed drifted ${seed}`);
+    console.log(seed, "steady", steady.win, steady.playerScore, steady.saw.join("+") || "-", "perfect", perfect.win, perfect.playerScore);
   }
-
-  const report = {
-    samples,
-    readR1: readR1 / samples,
-    readWin: readWin / samples,
-    badR1: badR1 / samples,
-    freezeR1: freezeR1 / samples,
-    perfectR1: perfectR1 / samples,
-    perfectWin: perfectWin / samples,
-  };
-  console.log(JSON.stringify(report, null, 2));
-  if (report.freezeR1 > 0) throw new Error("timeout survived round 1");
-  if (report.readR1 < 0.7) throw new Error(`heuristic round 1 too low ${report.readR1}`);
-  if (report.perfectR1 < 0.9) throw new Error(`perfect round 1 too low ${report.perfectR1}`);
-  if (report.perfectWin < 0.9) throw new Error(`perfect win too low ${report.perfectWin}`);
-  if (report.badR1 > 0.55) throw new Error(`bad play survives too often ${report.badR1}`);
+  assert(perfectWins === seeds.length, `perfect clears ${perfectWins}/${seeds.length}`);
+  assert(steadyWins >= Math.ceil(seeds.length * 0.6), `steady clears ${steadyWins}/${seeds.length}`);
+  assert(steadySawDuel >= 4, `rules rarely appear ${steadySawDuel}`);
+  console.log(JSON.stringify({ seeds: seeds.length, steadyWins, perfectWins, steadySawDuel }));
 }

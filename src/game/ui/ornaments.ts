@@ -1,19 +1,5 @@
-import type { Suit } from "../types";
-
-const HEART = `<path fill="currentColor" d="M16 28C16 28 3.5 18.2 3.5 11.2 3.5 6.4 7.2 3.2 11.4 5.1 13.4 6 15 8.2 16 10.2 17 8.2 18.6 6 20.6 5.1 24.8 3.2 28.5 6.4 28.5 11.2 28.5 18.2 16 28 16 28Z"/>`;
-const DIAMOND = `<path fill="currentColor" d="M16 1.8 30.2 16 16 30.2 1.8 16Z"/>`;
-const CLUB = `<g fill="currentColor"><circle cx="16" cy="9" r="5.2"/><circle cx="9.2" cy="16.6" r="5.2"/><circle cx="22.8" cy="16.6" r="5.2"/><path d="M13.6 18.5h4.8L20.2 29h-8.4z"/></g>`;
-const SPADE = `<g fill="currentColor"><path d="M16 2.2C16 2.2 3.2 13.2 3.2 19.6c0 4.2 3.3 7 6.6 6.2 1.7-.4 2.8-1.8 3.6-3.4.7 1.8 1.6 3.6 3.5 4 3.4.8 6.7-2 6.7-6.2C23.6 13.2 16 2.2 16 2.2Z"/><path d="M13.7 23.2h4.6L20 30h-8z"/></g>`;
-
-const PATHS: Record<Suit, string> = {
-  spades: SPADE,
-  hearts: HEART,
-  diamonds: DIAMOND,
-  clubs: CLUB,
-};
-
-export function suitMark(suit: Suit, size = 28): string {
-  return `<svg class="suit-mark suit-${suit}" width="${size}" height="${size}" viewBox="0 0 32 32" aria-hidden="true">${PATHS[suit]}</svg>`;
+export function diamondMark(size = 16): string {
+  return `<svg class="diamond" width="${size}" height="${size}" viewBox="0 0 32 32" aria-hidden="true"><path fill="currentColor" d="M16 1.8 30.2 16 16 30.2 1.8 16Z"/></svg>`;
 }
 
 export function heraldicRose(): string {
@@ -39,9 +25,9 @@ export function sealMarkup(): string {
       <circle cx="100" cy="100" r="78" fill="none" stroke="currentColor" stroke-width="0.35" stroke-dasharray="1.5 4"/>
     </svg>
     <div class="seal-core">
-      <span class="latin">pageant</span>
-      <strong>入境</strong>
-      <span class="latin seal-over">overtime</span>
+      <span class="latin">diamond</span>
+      <strong>开庭</strong>
+      <span class="latin seal-over">0.8</span>
       ${heraldicRose()}
     </div>
   </div>`;
@@ -62,4 +48,13 @@ export function muteIcon(muted: boolean): string {
     return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h3l4-3v12l-4-3H4V9z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M16 9l5 6M21 9l-5 6" stroke="currentColor" stroke-width="1.2"/></svg>`;
   }
   return `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h3l4-3v12l-4-3H4V9z" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M16 9c1.4 1.2 1.4 4.8 0 6M18.5 7c2.2 2 2.2 8 0 10" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>`;
+}
+
+export function scalesBeam(): string {
+  return `<svg class="beam" viewBox="0 0 1000 72" aria-hidden="true">
+    <path d="M100 28 H900" fill="none" stroke="currentColor" stroke-width="1.2"/>
+    <path d="M500 28 L478 58 H522 Z" fill="currentColor"/>
+    <path d="M500 58 V70" stroke="currentColor" stroke-width="1"/>
+    <path d="M100 28 V42 M300 28 V42 M500 28 V42 M700 28 V42 M900 28 V42" stroke="currentColor" stroke-width="1"/>
+  </svg>`;
 }
